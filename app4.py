@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -5,30 +7,85 @@ import json
 import hashlib
 from datetime import date, datetime, timedelta
 
+
+# ============================================================
+# Настройки страницы
+# ============================================================
+
 st.set_page_config(
     page_title="Цифровая прослеживаемость",
     page_icon="📏",
     layout="wide"
 )
 
-# -----------------------------
+
+# ============================================================
 # Вспомогательные функции
-# -----------------------------
+# ============================================================
+
+def to_native(obj):
+    """
+    Преобразует numpy-типы в стандартные Python-типы,
+    чтобы объект можно было корректно сохранить в JSON.
+    """
+    if isinstance(obj, dict):
+        return {str(k): to_native(v) for k, v in obj.items()}
+
+    elif isinstance(obj, list):
+        return [to_native(v) for v in obj]
+
+    elif isinstance(obj, tuple):
+        return tuple(to_native(v) for v in obj)
+
+    elif isinstance(obj, np.integer):
+        return int(obj)
+
+    elif isinstance(obj, np.floating):
+        return float(obj)
+
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+
+    elif isinstance(obj, (date, datetime)):
+        return obj.isoformat()
+
+    else:
+        return obj
+
 
 def parse_readings(text):
     """
-    Преобразование строки с измерениями в список чисел.
-    Допускаются разделители: пробел, запятая, точка с запятой, перенос строки.
+    Преобразование строки с измерениями в массив чисел.
+    Допускаются разделители:
+    - пробел;
+    - запятая;
+    - точка с запятой;
+    - перенос строки.
+
+    Важно:
+    Для десятичной дроби лучше использовать точку.
+    Например: 24.91
     """
-    text = text.replace(",", " ")
-    text = text.replace(";", " ")
-    text = text.replace("\n", " ")
+    if not isinstance(text, str):
+        return np.array([], dtype=float)
+
+    normalized = text.replace(";", " ")
+    normalized = normalized.replace("\n", " ")
+
+    # Поддержка десятичной запятой в простом случае:
+    # если пользователь ввел "24,91 24,92", заменим запятые на точки.
+    # Но если ввел "24,91, 24,92", тоже обработается.
+    normalized = normalized.replace(",", " ")
+
     values = []
-    for item in text.split():
+
+    for item in normalized.split():
+        item = item.strip()
         try:
             values.append(float(item))
         except ValueError:
             pass
+
     return np.array(values, dtype=float)
 
 
@@ -37,12 +94,15 @@ def canonical_hash(data_dict):
     Формирование SHA-256 хеша цифрового документа.
     Хеш позволяет проверить, что данные не были изменены.
     """
+    data_dict = to_native(data_dict)
+
     canonical = json.dumps(
         data_dict,
         ensure_ascii=False,
         sort_keys=True,
-        indent=None
+        separators=(",", ":")
     )
+
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -59,14 +119,26 @@ def uncertainty_budget(
 ):
     """
     Расчет составляющих стандартной неопределенности.
+    Все результаты приводятся к стандартному типу float.
     """
-    u_repeat = std / np.sqrt(n) if n > 1 else 0.0
-    u_resolution = resolution / np.sqrt(12)
-    u_scale = abs(mean_indication) * u_k
-    u_offset = u_b
-    u_reference = u_ref
-    u_drift = drift_limit / np.sqrt(3)
-    u_environment = env_limit / np.sqrt(3)
+
+    mean_indication = float(mean_indication)
+    n = int(n)
+    std = float(std)
+    resolution = float(resolution)
+    u_k = float(u_k)
+    u_b = float(u_b)
+    u_ref = float(u_ref)
+    drift_limit = float(drift_limit)
+    env_limit = float(env_limit)
+
+    u_repeat = float(std / np.sqrt(n)) if n > 1 else 0.0
+    u_resolution = float(resolution / np.sqrt(12))
+    u_scale = float(abs(mean_indication) * u_k)
+    u_offset = float(u_b)
+    u_reference = float(u_ref)
+    u_drift = float(drift_limit / np.sqrt(3))
+    u_environment = float(env_limit / np.sqrt(3))
 
     components = {
         "Повторяемость": u_repeat,
@@ -78,21 +150,25 @@ def uncertainty_budget(
         "Влияние условий окружающей среды": u_environment,
     }
 
-    uc = np.sqrt(sum(v ** 2 for v in components.values()))
-    U = 2 * uc
+    uc = float(np.sqrt(sum(float(v) ** 2 for v in components.values())))
+    U = float(2 * uc)
 
     return components, uc, U
 
 
-# -----------------------------
+# ============================================================
 # Заголовок
-# -----------------------------
+# ============================================================
 
 st.title("📏 Виртуальная практическая работа")
 st.subheader("Цифровая прослеживаемость результатов измерений")
 
 st.markdown(
     """
+    **Дисциплина:** Цифровая метрология  
+    **Тема:** Цифровая прослеживаемость результатов измерений  
+    **Продолжительность:** 1,5 часа  
+
     **Цель работы:** изучить принцип цифровой метрологической прослеживаемости,
     рассчитать результат измерения с учетом калибровочных коэффициентов,
     оценить неопределенность и сформировать цифровой сертификат измерения.
@@ -108,9 +184,10 @@ tabs = st.tabs([
     "6. Вопросы и вывод"
 ])
 
-# -----------------------------
-# Вкладка 1
-# -----------------------------
+
+# ============================================================
+# Вкладка 1. Описание
+# ============================================================
 
 with tabs[0]:
     st.header("1. Описание практической работы")
@@ -120,7 +197,7 @@ with tabs[0]:
         В данной работе рассматривается пример цифровой прослеживаемости
         результата измерения температуры.
 
-        Прослеживаемость означает, что результат измерения может быть связан
+        **Прослеживаемость** означает, что результат измерения может быть связан
         с эталоном через непрерывную цепочку калибровок, каждая из которых
         имеет документированную неопределенность.
 
@@ -157,9 +234,26 @@ with tabs[0]:
         """
     )
 
-# -----------------------------
-# Вкладка 2
-# -----------------------------
+    st.markdown("### Что студент должен получить по итогам работы")
+
+    st.markdown(
+        """
+        По итогам выполнения работы необходимо получить:
+
+        1. Исправленное значение измеряемой величины.
+        2. Бюджет неопределенности.
+        3. Расширенную неопределенность.
+        4. Проверку полноты цепочки прослеживаемости.
+        5. Проверку срока действия калибровки.
+        6. Цифровой сертификат измерения в формате JSON.
+        7. SHA-256 хеш цифрового документа.
+        """
+    )
+
+
+# ============================================================
+# Вкладка 2. Цепочка прослеживаемости
+# ============================================================
 
 with tabs[1]:
     st.header("2. Цепочка цифровой метрологической прослеживаемости")
@@ -167,7 +261,7 @@ with tabs[1]:
     st.markdown(
         """
         Выберите элементы цепочки прослеживаемости, которые присутствуют
-        в вашем виртуальном измерительном процессе.
+        в виртуальном измерительном процессе.
         """
     )
 
@@ -195,18 +289,25 @@ with tabs[1]:
 
     st.markdown("### Условная схема")
 
-    st.graphviz_chart("""
-        digraph {
-            rankdir=LR;
-            A [label="Национальный эталон"];
-            B [label="Эталон организации"];
-            C [label="Калибратор"];
-            D [label="Датчик"];
-            E [label="Измерение"];
-            F [label="Цифровой сертификат"];
-            A -> B -> C -> D -> E -> F;
-        }
-    """)
+    # Чтобы избежать возможных проблем с graphviz на облаке,
+    # схема дана в markdown-формате.
+    st.markdown(
+        """
+        ```text
+        Национальный эталон
+                ↓
+        Эталон организации
+                ↓
+        Калибратор температуры
+                ↓
+        Калиброванный датчик температуры
+                ↓
+        Средство регистрации / ПО обработки
+                ↓
+        Цифровой сертификат результата
+        ```
+        """
+    )
 
     required = [
         "Национальный эталон",
@@ -221,11 +322,15 @@ with tabs[1]:
     if chain_ok:
         st.success("Цепочка прослеживаемости содержит основные необходимые элементы.")
     else:
-        st.warning("Цепочка прослеживаемости неполная. Проверьте наличие эталона, калибратора, датчика и цифрового сертификата.")
+        st.warning(
+            "Цепочка прослеживаемости неполная. "
+            "Проверьте наличие эталона, калибратора, датчика и цифрового сертификата."
+        )
 
-# -----------------------------
-# Вкладка 3
-# -----------------------------
+
+# ============================================================
+# Вкладка 3. Исходные данные
+# ============================================================
 
 with tabs[2]:
     st.header("3. Исходные данные и параметры калибровки")
@@ -332,16 +437,25 @@ with tabs[2]:
         format="%.4f"
     )
 
-# -----------------------------
-# Расчёты общие
-# -----------------------------
+    st.info(
+        """
+        Совет: попробуйте изменить дату калибровки, разрешение датчика,
+        предел дрейфа или разброс измерений и посмотрите, как изменится
+        итоговая неопределенность и статус прослеживаемости.
+        """
+    )
+
+
+# ============================================================
+# Общие расчеты
+# ============================================================
 
 readings = parse_readings(readings_text)
 
 if len(readings) > 0:
     mean_I = float(np.mean(readings))
     std_I = float(np.std(readings, ddof=1)) if len(readings) > 1 else 0.0
-    corrected_T = k * mean_I + b
+    corrected_T = float(k * mean_I + b)
 
     components, uc, U = uncertainty_budget(
         mean_I,
@@ -355,9 +469,9 @@ if len(readings) > 0:
         env_limit
     )
 
-    valid_until = calibration_date + timedelta(days=int(30 * calibration_interval_months))
-    cert_valid = date.today() <= valid_until
-    uncertainty_ok = U <= max_allowed_U
+    valid_until = calibration_date + timedelta(days=int(30 * int(calibration_interval_months)))
+    cert_valid = bool(date.today() <= valid_until)
+    uncertainty_ok = bool(U <= float(max_allowed_U))
 else:
     mean_I = None
     std_I = None
@@ -369,9 +483,10 @@ else:
     cert_valid = False
     uncertainty_ok = False
 
-# -----------------------------
-# Вкладка 4
-# -----------------------------
+
+# ============================================================
+# Вкладка 4. Расчет
+# ============================================================
 
 with tabs[3]:
     st.header("4. Расчёт результата измерения и неопределенности")
@@ -382,7 +497,7 @@ with tabs[3]:
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            st.metric("Количество измерений", len(readings))
+            st.metric("Количество измерений", f"{len(readings)}")
 
         with col2:
             st.metric("Среднее показание I, °C", f"{mean_I:.4f}")
@@ -395,34 +510,39 @@ with tabs[3]:
         st.latex(r"T = k \cdot I + b")
 
         st.success(
-            f"Исправленное значение температуры: **T = {corrected_T:.3f} °C**"
+            f"Исправленное значение температуры: **T = {corrected_T:.3f} {unit}**"
         )
 
         st.markdown("### Бюджет стандартной неопределенности")
 
         budget_df = pd.DataFrame({
             "Составляющая": list(components.keys()),
-            "Стандартная неопределенность, °C": list(components.values())
+            "Стандартная неопределенность, °C": [float(v) for v in components.values()]
         })
 
         st.dataframe(budget_df, use_container_width=True)
 
-        st.bar_chart(
-            budget_df.set_index("Составляющая")
-        )
+        chart_df = budget_df.set_index("Составляющая")
+        st.bar_chart(chart_df)
 
         st.markdown("### Итоговая неопределенность")
 
         col4, col5 = st.columns(2)
 
         with col4:
-            st.metric("Суммарная стандартная неопределенность uc, °C", f"{uc:.4f}")
+            st.metric(
+                "Суммарная стандартная неопределенность uc, °C",
+                f"{uc:.4f}"
+            )
 
         with col5:
-            st.metric("Расширенная неопределенность U, °C при k=2", f"{U:.4f}")
+            st.metric(
+                "Расширенная неопределенность U, °C при k=2",
+                f"{U:.4f}"
+            )
 
         st.info(
-            f"Результат измерения: **T = ({corrected_T:.3f} ± {U:.3f}) °C, k = 2**"
+            f"Результат измерения: **T = ({corrected_T:.3f} ± {U:.3f}) {unit}, k = 2**"
         )
 
         st.markdown("### Проверка пригодности результата")
@@ -437,9 +557,10 @@ with tabs[3]:
         else:
             st.error(f"Срок действия калибровки истёк: {valid_until}.")
 
-# -----------------------------
-# Вкладка 5
-# -----------------------------
+
+# ============================================================
+# Вкладка 5. Цифровой сертификат
+# ============================================================
 
 with tabs[4]:
     st.header("5. Цифровой сертификат измерения")
@@ -456,38 +577,42 @@ with tabs[4]:
                 "manufacturer": manufacturer,
                 "measurand": measurand,
                 "unit": unit,
-                "resolution": resolution
+                "resolution": float(resolution)
             },
             "calibration": {
                 "calibration_date": str(calibration_date),
                 "valid_until": str(valid_until),
-                "scale_coefficient_k": k,
-                "offset_b": b,
-                "standard_uncertainty_k": u_k,
-                "standard_uncertainty_b": u_b,
-                "standard_uncertainty_reference": u_ref,
+                "scale_coefficient_k": float(k),
+                "offset_b": float(b),
+                "standard_uncertainty_k": float(u_k),
+                "standard_uncertainty_b": float(u_b),
+                "standard_uncertainty_reference": float(u_ref),
                 "traceability_chain": chain_elements
             },
             "measurement": {
-                "raw_readings": readings.tolist(),
-                "mean_indication": mean_I,
-                "standard_deviation": std_I,
-                "corrected_result": corrected_T,
+                "raw_readings": [float(x) for x in readings.tolist()],
+                "mean_indication": float(mean_I),
+                "standard_deviation": float(std_I),
+                "corrected_result": float(corrected_T),
                 "unit": unit
             },
-            "uncertainty_budget": components,
+            "uncertainty_budget": {
+                str(name): float(value)
+                for name, value in components.items()
+            },
             "uncertainty": {
-                "combined_standard_uncertainty": uc,
+                "combined_standard_uncertainty": float(uc),
                 "coverage_factor": 2,
-                "expanded_uncertainty": U
+                "expanded_uncertainty": float(U)
             },
             "quality_checks": {
-                "traceability_chain_complete": chain_ok,
-                "calibration_valid": cert_valid,
-                "uncertainty_within_limit": uncertainty_ok
+                "traceability_chain_complete": bool(chain_ok),
+                "calibration_valid": bool(cert_valid),
+                "uncertainty_within_limit": bool(uncertainty_ok)
             }
         }
 
+        dcc = to_native(dcc)
         dcc_hash = canonical_hash(dcc)
         dcc["sha256_hash"] = dcc_hash
 
@@ -499,9 +624,15 @@ with tabs[4]:
 
         st.code(dcc_hash)
 
+        json_data = json.dumps(
+            dcc,
+            ensure_ascii=False,
+            indent=4
+        )
+
         st.download_button(
             label="Скачать цифровой сертификат JSON",
-            data=json.dumps(dcc, ensure_ascii=False, indent=4),
+            data=json_data.encode("utf-8"),
             file_name="digital_measurement_certificate.json",
             mime="application/json"
         )
@@ -509,7 +640,9 @@ with tabs[4]:
         st.markdown("### Итоговая проверка цифровой прослеживаемости")
 
         if chain_ok and cert_valid and uncertainty_ok:
-            st.success("Результат можно считать цифрово прослеживаемым в рамках учебной модели.")
+            st.success(
+                "Результат можно считать цифрово прослеживаемым в рамках учебной модели."
+            )
         else:
             st.warning(
                 """
@@ -518,9 +651,10 @@ with tabs[4]:
                 """
             )
 
-# -----------------------------
-# Вкладка 6
-# -----------------------------
+
+# ============================================================
+# Вкладка 6. Вопросы и вывод
+# ============================================================
 
 with tabs[5]:
     st.header("6. Контрольные вопросы и вывод")
@@ -556,3 +690,27 @@ with tabs[5]:
         - можно ли считать результат цифрово прослеживаемым.
         """
     )
+
+    st.markdown("### Автоматически сформированный краткий итог")
+
+    if len(readings) > 0:
+        if chain_ok and cert_valid and uncertainty_ok:
+            status = "результат удовлетворяет условиям цифровой прослеживаемости в рамках учебной модели"
+        else:
+            status = "результат требует проверки, так как не все условия цифровой прослеживаемости выполнены"
+
+        st.write(
+            f"""
+            По результатам виртуального измерения получено исправленное значение:
+
+            **T = ({corrected_T:.3f} ± {U:.3f}) {unit}, k = 2.**
+
+            Цепочка прослеживаемости полная: **{chain_ok}**.  
+            Калибровка действительна: **{cert_valid}**.  
+            Неопределенность в допустимых пределах: **{uncertainty_ok}**.  
+
+            Следовательно, {status}.
+            """
+        )
+    else:
+        st.warning("Для автоматического вывода необходимо ввести измерительные данные.")
